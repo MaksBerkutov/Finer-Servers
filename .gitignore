@@ -4,6 +4,7 @@
 .pnp.js
 .pack
 /node_modules
+.env
 
 # testing
 /coverage
@@ -23,7 +24,6 @@ yarn-debug.log*
 yarn-error.log*
 
 # configuration
-/config/config.dev.js
-/store/*
-!/store/
+/store/toke
 /node_modules/*
+package-lock.json

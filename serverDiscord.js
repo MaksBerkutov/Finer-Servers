@@ -1,6 +1,5 @@
 import { REST, Routes } from 'discord.js'
-//import config from './config.json' assert { type: 'json' }
-import config from './config/config.dev.js'
+import config from './config/config.js'
 
 const commands = [
 	{
