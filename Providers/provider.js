@@ -75,7 +75,12 @@ async function getStream(providerObject) {
 	map['YouTube'] = getStreamYouTube
 	map['SoundCloud'] = GetStreamSoundCloud
 	map['Spotify'] = getStreamSpotify
-	return await map[providerObject.provider](providerObject.url)
+	const streamFunction = map[providerObject.provider];
+    if (!streamFunction) {
+        throw new Error('Unsupported provider: ' + providerObject.provider);
+    }
+
+    return await streamFunction(providerObject.url);
 }
 
 export { createProviderList, getStream }

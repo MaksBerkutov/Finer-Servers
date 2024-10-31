@@ -17,8 +17,7 @@ class DatabaseController {
 	}
 	async #handler(func) {
 		const client = new MongoClient(this.#url, {
-			useNewUrlParser: true,
-			useUnifiedTopology: true,
+
 		})
 		try {
 			await client.connect()

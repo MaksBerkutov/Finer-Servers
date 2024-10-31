@@ -20,8 +20,8 @@ import express from 'express'
 import cors from 'cors'
 
 import http from 'http'
-//import config from './config/config.dev.js'
-import config from './config/config.prod.js'
+import config from './config/config.dev.js'
+//import config from './config/config.prod.js'
 
 const clientID = config.discord_client_id
 const clientSecert = config.discord_secret_id
@@ -271,50 +271,94 @@ async function connectToVoiceChat(voiceChannel, id) {
 }
 
 function createPlayer(id) {
-	const playlistObject = mainPlaylistObjectController.getById(id)
+    const playlistObject = mainPlaylistObjectController.getById(id);
 
-	playlistObject.player = createAudioPlayer()
+    if (!playlistObject) {
+        console.error(`Playlist with ID ${id} not found.`);
+        return;
+    }
 
-	playlistObject.player.on('idle', () => {
-		moveNext(id)
-	})
-	playlistObject.player.on('error', error => {
-		console.error('Player error:', error)
-		playlistObject.connection.disconnect()
-	})
-	mainPlaylistObjectController.change(id, playlistObject)
+    playlistObject.player = createAudioPlayer();
+
+    playlistObject.player.on('idle', () => {
+        console.log(`Player is idle for playlist ID ${id}. Moving to the next track.`);
+        moveNext(id);
+    });
+
+    playlistObject.player.on('error', error => {
+        console.error('Player error:', error);
+        // Consider logging additional information about the current track.
+        playlistObject.connection.disconnect();
+    });
+
+    // Optionally, log the creation of the player
+    console.log(`Created audio player for playlist ID ${id}`);
+
+    mainPlaylistObjectController.change(id, playlistObject);
 }
 
+
 async function playMusic(VoiceChannel, id, TextChannel) {
-	console.log('I HERE')
-	const playlistObject = mainPlaylistObjectController.getById(id)
-	if (TextChannel !== undefined)
-		await mainDatabaseController.setChatMusicBot(TextChannel, id)
-	const currentSongs = await mainDatabaseController.getCurrentPlayedElemet(id)
-	if (playlistObject.connection == undefined)
-		connectToVoiceChat(VoiceChannel, id)
+    console.log('Entering playMusic function');
+    
+    const playlistObject = mainPlaylistObjectController.getById(id);
+    if (TextChannel !== undefined) {
+        await mainDatabaseController.setChatMusicBot(TextChannel, id);
+    }
 
-	let stream = await getStream(currentSongs)
+    const currentSongs = await mainDatabaseController.getCurrentPlayedElemet(id);
+    console.log('Current Songs:', currentSongs);
 
-	if (playlistObject.player == null) {
-		createPlayer(id)
-	}
+    // Ensure the voice connection is established
+    if (playlistObject.connection === undefined) {
+        connectToVoiceChat(VoiceChannel, id);
+    }
 
-	const resource = createAudioResource(stream, {
-		inputType: stream.type,
-		metadata: {
-			title: 'Now Playing',
-			///url: 'https://www.youtube.com/watch?v=your_video_id',
-		},
-	})
+    try {
+        const stream = await getStream(currentSongs);
+        console.log('Stream:', stream);
 
-	await playlistObject.player.play(resource, { seek: 1 / 1000 })
-	if (playlistObject.connection == undefined) return
+        if (!stream) {
+            throw new Error('Stream could not be created.');
+        }
 
-	playlistObject.connection.subscribe(playlistObject.player)
-	mainPlaylistObjectController.change(id, playlistObject)
+        // Create the audio resource
+        const resource = createAudioResource(stream, {
+            inputType: stream.type,
+            metadata: {
+                title: 'Now Playing',
+                // Optionally add a URL if needed
+                // url: 'https://www.youtube.com/watch?v=your_video_id',
+            },
+        });
 
-	onChangeIndex(id, currentSongs.id)
+
+        // Check if the player exists, if not create it
+        if (playlistObject.player == null) {
+            createPlayer(id);
+        }
+
+        // Play the audio resource
+        await playlistObject.player.play(resource, { seek: 1 / 1000 });
+        console.log('Playing resource:', resource.metadata.title);
+
+        // Subscribe the connection to the player
+        if (playlistObject.connection !== undefined) {
+            playlistObject.connection.subscribe(playlistObject.player);
+        } else {
+            console.warn('Connection is undefined, cannot subscribe to player.');
+        }
+
+        // Update the index of the currently playing song
+        onChangeIndex(id, currentSongs.id);
+    } catch (error) {
+        console.error('Error while playing music:', error.message);
+        
+        // Send an error message to the text channel if available
+        if (TextChannel) {
+            await TextChannel.send(`An error occurred while trying to play the music: ${error.message}`);
+        }
+    }
 }
 
 function OnAdd(song, serverId) {
@@ -322,64 +366,75 @@ function OnAdd(song, serverId) {
 }
 
 async function playCommand(interaction, options, id) {
-	const link = options.getString('query')
+	const link = options.getString('query');
+	const voiceChannel = interaction.member.voice.channel;
+	const textChannel = interaction.channel.id;
 
-	const voiceChannel = interaction.member.voice.channel
-	const textChannel = interaction.channel.id
 	if (!voiceChannel) {
-		await interaction.reply(
-			'Вы должны быть в голосовм канале для использование данной комманды.'
-		)
-		return
+		await interaction.reply('Вы должны быть в голосовм канале для использование данной комманды.');
+		return;
 	}
+
 	try {
-		if (config.slowed) await interaction.reply('Приянто (^_^)/')
+		if (config.slowed) await interaction.reply('Приянто (^_^)/');
 	} catch (error) {
-		console.log('SLOWED HOST')
+		console.log('SLOWED HOST');
 	}
 
 	const callback = config.slowed
-		? async text => {
-				await SendToChatByChatId(text, textChannel)
-		  }
-		: async text => {
-				await interaction.reply(text)
-		  }
+		? async text => { await SendToChatByChatId(text, textChannel); }
+		: async text => { await interaction.reply(text); };
 
-	mainDatabaseController.setlastVoiceChannel(voiceChannel.id, id)
+	mainDatabaseController.setlastVoiceChannel(voiceChannel.id, id);
+
 	try {
-		let currentPlayed = await mainDatabaseController.getCurrentPlayed(id)
-		const objectPlaylist = mainPlaylistObjectController.getById(id)
-		const playlist = await mainDatabaseController.getPlalyst(id)
+		let currentPlayed = await mainDatabaseController.getCurrentPlayed(id);
+		const objectPlaylist = mainPlaylistObjectController.getById(id);
+		const playlist = await mainDatabaseController.getPlalyst(id);
 
-		let added = {}
-		if (
-			playlist.length == 0 ||
-			currentPlayed === -1 ||
-			objectPlaylist.connection === undefined
-		) {
-			added = await mainDatabaseController.pushMusciToPlaylist(
-				await createProviderList(link, interaction.user.username),
-				id
-			)
-			if (objectPlaylist.connection !== undefined || currentPlayed == -1)
-				currentPlayed = await mainDatabaseController.setCurrentPlayed(0, id)
-			await playMusic(voiceChannel, id, textChannel)
+		let added;  // Declare 'added' here
 
-			await callback('Сейчас играет: ' + playlist[currentPlayed].url)
+		if (playlist.length === 0 || currentPlayed === -1 || !objectPlaylist.connection) {
+			const providerList = await createProviderList(link, interaction.user.username);
+			if (!providerList) {
+				await callback('Failed to create provider list. Check your link and try again.');
+				return;
+			}
+
+			added = await mainDatabaseController.pushMusciToPlaylist(providerList, id);
+			if (objectPlaylist.connection || currentPlayed === -1) {
+				currentPlayed = await mainDatabaseController.setCurrentPlayed(0, id);
+			}
+
+			await playMusic(voiceChannel, id, textChannel);
+
+			if (playlist[currentPlayed] && playlist[currentPlayed].url) {
+				await callback('Сейчас играет: ' + playlist[currentPlayed].url);
+			} else {
+				console.error("URL not found in playlist entry:", playlist[currentPlayed]);
+				await callback('URL not found in the current track.');
+			}
 		} else {
 			added = await mainDatabaseController.pushMusciToPlaylist(
 				await createProviderList(link, interaction.user.username),
 				id
-			)
-			await callback(`Добавленна новая песня; ${added.url} [${added.provider}]`)
+			);
+			await callback(`Добавлена новая песня: ${added.url} [${added.provider}]`);
 		}
-		OnAdd(added, id)
+
+		OnAdd(added, id);
 	} catch (error) {
-		console.error(error)
-		await callback(error.message)
+		console.error("Error in playCommand:", error);
+
+		// Check if reply has already been sent
+		if (!interaction.replied) {
+			await callback(error.message);
+		} else {
+			console.error("Interaction already replied. Cannot send another reply.");
+		}
 	}
 }
+
 
 client.login(config.discord_token)
 
@@ -538,7 +593,7 @@ const io = new Server(server, {
 	},
 	transports: ['websocket', 'polling'],
 })
-server.listen(port, '0.0.0.0', () => {
+server.listen(port, /*'0.0.0.0',*/ () => {
 	console.log(`server start listening on port ${port}`)
 })
 
